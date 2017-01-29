@@ -1,0 +1,3 @@
+GET     /bank/balance       controllers.BankService.balance
+
+PUT     /bank/deposit       controllers.BankService.deposit
