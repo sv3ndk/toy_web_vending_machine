@@ -21,7 +21,7 @@ class BankState {
 
   def deposit(added: Bank, targetAmount: Int): Either[String, Bank] = {
 
-    // not threadsafe,
+    // not threadsafe
     bank.deposit(added, targetAmount) match {
       case Right((updatedBank, change)) =>
         bank = updatedBank
@@ -29,12 +29,19 @@ class BankState {
 
       case Left(errorMsg) => Left(errorMsg)
     }
-
   }
 }
 
-case class DepositRequest(txId: Int, target: Int, coins: Seq[Int], notes: Seq[Int])
+case class BalanceResponse(balance: Int)
 
+case class DepositRequest(txid: Int, target: Int, coins: Seq[Int], notes: Seq[Int])
+case class Change(coins: List[Int], notes: List[Int])
+case class DepositReponse(txid: Int, message: String, change: Change)
+
+/**
+ * Entry point for the bank service. Mostly only json parsing and validation
+ * logic is here, the actual bank and change logic is delegated to Bank
+ */
 class BankService @Inject() (state: BankState) extends Controller {
 
   import BankService._
@@ -43,7 +50,7 @@ class BankService @Inject() (state: BankState) extends Controller {
    * Return the current balance of the bank
    */
   def balance() = Action {
-    Ok(Json.parse(s"""{"balance": ${state.bank.total} }"""))
+    Ok(Json.toJson(BalanceResponse(state.bank.total)))
   }
 
   /**
@@ -51,7 +58,6 @@ class BankService @Inject() (state: BankState) extends Controller {
    *
    * This method accepts requests formatted as follows and delegates the deposit
    * action to the inner bank object
-   *
    *
    * {
    * "txid": 1,
@@ -84,20 +90,16 @@ class BankService @Inject() (state: BankState) extends Controller {
             case Success(tokens) =>
 
               state.deposit(tokens, req.target) match {
-                case Left(errorMsg) => BadRequest(errorResponse(errorMsg))
+                case Left(errorMsg) => InternalServerError(errorResponse(errorMsg))
 
                 case Right(change) =>
 
-                  Ok(Json.parse(
-                    s"""{
-                       |"txid": ${req.txId},
-                       |"message": "deposit accepted",
-                       |"change" :  {
-                       |  "coins": [${change.coinsValue.mkString(",")}],
-                       |  "notes": [${change.notesValue.mkString(",")}]
-                       |}
-                   |}""".stripMargin
-                  ))
+                  val response = DepositReponse(
+                    txid = req.txid, message = "deposit accepted",
+                    change = Change(change.coinsValue, change.notesValue)
+                  )
+
+                  Ok(Json.toJson(response))
               }
           }
       }
@@ -107,7 +109,7 @@ class BankService @Inject() (state: BankState) extends Controller {
 }
 
 /**
- * This companion object is mostly for JSOn handling
+ * This companion object is mostly a container for json handling methods
  */
 object BankService {
 
@@ -145,6 +147,21 @@ object BankService {
     (JsPath \ "tokens" \ "coins").read[Seq[Int]] and
     (JsPath \ "tokens" \ "notes").read[Seq[Int]]
   )(DepositRequest.apply _)
+
+  // maybe a simpler solution was to simply use Json.format[BalanceResponse] here...
+  implicit val balanceResponseWrite: Writes[BalanceResponse] =
+    (JsPath \ "balance").write[Int].contramap(unlift(BalanceResponse.unapply))
+
+  implicit val changeWrite: Writes[Change] = (
+    (JsPath \ "coins").write[List[Int]] and
+    (JsPath \ "notes").write[List[Int]]
+  )(unlift(Change.unapply))
+
+  implicit val depositResponseWrite: Writes[DepositReponse] = (
+    (JsPath \ "txid").write[Int] and
+    (JsPath \ "message").write[String] and
+    (JsPath \ "change").write[Change]
+  )(unlift(DepositReponse.unapply))
 
   def errorResponse(ex: Throwable): JsValue = errorResponse(ex.getMessage)
 
