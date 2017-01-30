@@ -176,3 +176,4 @@ Caused by: com.fasterxml.jackson.core.JsonParseException: Unexpected character (
 2017-01-29 18:30:09,373 [INFO] from play.api.Play in application-akka.actor.default-dispatcher-2 - Application started (Dev)
 2017-01-29 18:30:23,672 [INFO] from play.api.Play in application-akka.actor.default-dispatcher-2 - Application started (Dev)
 2017-01-29 18:43:52,251 [INFO] from play.api.Play in application-akka.actor.default-dispatcher-3 - Application started (Dev)
+2017-01-29 19:11:55,641 [INFO] from play.api.Play in application-akka.actor.default-dispatcher-3 - Application started (Dev)
