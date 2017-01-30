@@ -9,7 +9,6 @@ import play.api.mvc._
 import play.api.libs.json._
 import play.api.libs.functional.syntax._
 import play.api.Logger
-import play.api.libs.concurrent.Akka
 import vending.Bank
 
 import scala.concurrent.{ ExecutionContext, Future }
@@ -17,18 +16,34 @@ import scala.util.{ Failure, Success, Try }
 
 @Singleton
 class BankState {
-  var bank = Bank(200)
+  private var bank = Bank(200)
 
-  def deposit(added: Bank, targetAmount: Int): Either[String, Bank] = {
+  // hackish way to make this idempotent that will beautifully OOM at some point ^^
+  private var knownTxIds = Map[Int, Either[String, DepositOkReponse]]()
 
-    // not threadsafe
-    bank.deposit(added, targetAmount) match {
-      case Right((updatedBank, change)) =>
-        bank = updatedBank
-        Right(change)
+  def total = bank.total
 
-      case Left(errorMsg) => Left(errorMsg)
+  /**
+   * Non thread-safe idempotent state update
+   */
+  def deposit(txid: Int, added: Bank, targetAmount: Int): Either[String, DepositOkReponse] = {
+
+    if (!(knownTxIds contains txid)) {
+      val result = bank.deposit(added, targetAmount) match {
+        case Right((updatedBank, change)) =>
+          bank = updatedBank
+          Right(DepositOkReponse(
+            txid = txid, message = "deposit accepted",
+            change = Change(change.coinsValue, change.notesValue)
+          ))
+
+        case Left(errorMsg) => Left(errorMsg)
+      }
+
+      knownTxIds += (txid -> result)
     }
+
+    knownTxIds(txid)
   }
 }
 
@@ -36,7 +51,7 @@ case class BalanceResponse(balance: Int)
 
 case class DepositRequest(txid: Int, target: Int, coins: Seq[Int], notes: Seq[Int])
 case class Change(coins: List[Int], notes: List[Int])
-case class DepositReponse(txid: Int, message: String, change: Change)
+case class DepositOkReponse(txid: Int, message: String, change: Change)
 
 /**
  * Entry point for the bank service. Mostly only json parsing and validation
@@ -50,14 +65,13 @@ class BankService @Inject() (state: BankState) extends Controller {
    * Return the current balance of the bank
    */
   def balance() = Action {
-    Ok(Json.toJson(BalanceResponse(state.bank.total)))
+    Ok(Json.toJson(BalanceResponse(state.total)))
   }
 
   /**
    * Deposit can be used for any kind of payment.
    *
-   * This method accepts requests formatted as follows and delegates the deposit
-   * action to the inner bank object
+   * This method accepts requests formatted as follows
    *
    * {
    * "txid": 1,
@@ -88,18 +102,9 @@ class BankService @Inject() (state: BankState) extends Controller {
             case f: Failure[_] => BadRequest(errorResponse(f.exception))
 
             case Success(tokens) =>
-
-              state.deposit(tokens, req.target) match {
+              state.deposit(req.txid, tokens, req.target) match {
+                case Right(response) => Ok(Json.toJson(response))
                 case Left(errorMsg) => InternalServerError(errorResponse(errorMsg))
-
-                case Right(change) =>
-
-                  val response = DepositReponse(
-                    txid = req.txid, message = "deposit accepted",
-                    change = Change(change.coinsValue, change.notesValue)
-                  )
-
-                  Ok(Json.toJson(response))
               }
           }
       }
@@ -157,11 +162,11 @@ object BankService {
     (JsPath \ "notes").write[List[Int]]
   )(unlift(Change.unapply))
 
-  implicit val depositResponseWrite: Writes[DepositReponse] = (
+  implicit val depositResponseWrite: Writes[DepositOkReponse] = (
     (JsPath \ "txid").write[Int] and
     (JsPath \ "message").write[String] and
     (JsPath \ "change").write[Change]
-  )(unlift(DepositReponse.unapply))
+  )(unlift(DepositOkReponse.unapply))
 
   def errorResponse(ex: Throwable): JsValue = errorResponse(ex.getMessage)
 

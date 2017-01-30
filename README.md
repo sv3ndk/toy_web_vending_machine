@@ -8,7 +8,7 @@ There are 3 json/REST web services:
 
 - a public VendingMachine API that exposes the item buying features, though actually delegates the execution to the two other WS instead. 
 
-- a Bank WS, basically a container of coins and notes, able to provide change
+- a Bank WS, basically an idempotent container of coins and notes, able to provide change
 
 - a Stock WS, essentially a container of the sold items.
 
