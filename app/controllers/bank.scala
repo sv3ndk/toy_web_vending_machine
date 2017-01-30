@@ -1,5 +1,6 @@
 package controllers
 
+import java.util.concurrent.Executors
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -8,9 +9,11 @@ import play.api.mvc._
 import play.api.libs.json._
 import play.api.libs.functional.syntax._
 import play.api.Logger
+import play.api.libs.concurrent.Akka
 import vending.Bank
 
-import scala.util.{ Success, Try, Failure }
+import scala.concurrent.{ ExecutionContext, Future }
+import scala.util.{ Failure, Success, Try }
 
 @Singleton
 class BankState {
@@ -18,7 +21,7 @@ class BankState {
 
   def deposit(added: Bank, targetAmount: Int): Either[String, Bank] = {
 
-    // whoops, this is not threadsafe, we'll figure this out later.. :)
+    // not threadsafe,
     bank.deposit(added, targetAmount) match {
       case Right((updatedBank, change)) =>
         bank = updatedBank
@@ -28,7 +31,6 @@ class BankState {
     }
 
   }
-
 }
 
 case class DepositRequest(txId: Int, target: Int, coins: Seq[Int], notes: Seq[Int])
@@ -61,44 +63,45 @@ class BankService @Inject() (state: BankState) extends Controller {
    * }
    *
    */
-  def deposit() = Action(BodyParsers.parse.json) { request =>
+  def deposit() = Action.async(BodyParsers.parse.json) { request =>
 
-    request.body.validate[DepositRequest] match {
+    Future {
+      request.body.validate[DepositRequest] match {
 
-      case e: JsError => BadRequest(errorJsonResponse(JsError.toJson(e).toString()))
+        case e: JsError => BadRequest(errorJsonResponse(JsError.toJson(e).toString()))
 
-      case success: JsSuccess[DepositRequest] =>
-        val req = success.get
+        case success: JsSuccess[DepositRequest] =>
+          val req = success.get
 
-        val maybeTokens = for {
-          coins <- parseCoins(req.coins)
-          notes <- parseNotes(req.notes)
-        } yield Bank(coins ++ notes)
+          val maybeTokens = for {
+            coins <- parseCoins(req.coins)
+            notes <- parseNotes(req.notes)
+          } yield Bank(coins ++ notes)
 
-        maybeTokens match {
-          case f: Failure[_] => BadRequest(errorResponse(f.exception))
+          maybeTokens match {
+            case f: Failure[_] => BadRequest(errorResponse(f.exception))
 
-          case Success(tokens) =>
+            case Success(tokens) =>
 
-            state.deposit(tokens, req.target) match {
-              case Left(errorMsg) => BadRequest(errorResponse(errorMsg))
+              state.deposit(tokens, req.target) match {
+                case Left(errorMsg) => BadRequest(errorResponse(errorMsg))
 
-              case Right(change) =>
+                case Right(change) =>
 
-                Ok(Json.parse(
-                  s"""{
-                     |"txid": ${req.txId},
-                     |"message": "deposit accepted",
-                     |"change" :  {
-                     |  "coins": [${change.coinsValue.mkString(",")}],
-                     |  "notes": [${change.notesValue.mkString(",")}]
-                     |}
-                 |}""".stripMargin
-                ))
-            }
-        }
-
-    }
+                  Ok(Json.parse(
+                    s"""{
+                       |"txid": ${req.txId},
+                       |"message": "deposit accepted",
+                       |"change" :  {
+                       |  "coins": [${change.coinsValue.mkString(",")}],
+                       |  "notes": [${change.notesValue.mkString(",")}]
+                       |}
+                   |}""".stripMargin
+                  ))
+              }
+          }
+      }
+    }(monothreadEc) // hackingly forcing sequencial execution since state update is not threadsafe ^^
 
   }
 }
@@ -108,6 +111,9 @@ class BankService @Inject() (state: BankState) extends Controller {
  */
 object BankService {
 
+  val monothreadEc = ExecutionContext.fromExecutor(
+    Executors.newFixedThreadPool(1)
+  )
   /**
    * Attempts to parse this sequence of coin values into the corresponding sequence of MoneyTokens
    */
