@@ -1,3 +1,8 @@
 GET     /bank/balance       controllers.BankService.balance
-
 PUT     /bank/deposit       controllers.BankService.deposit
+
+GET     /stock/price/:item  controllers.StockService.price(item)
+
+# I know, POST for a non-state updating method, it breaks the internet..
+# I'll live with that, and with a body in my request
+POST    /stock/total_price      controllers.StockService.totalPrice

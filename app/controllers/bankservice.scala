@@ -3,6 +3,7 @@ package controllers
 import java.util.concurrent.Executors
 import javax.inject.Inject
 import javax.inject.Singleton
+import model.Web
 
 import model.MoneyToken
 import play.api.mvc._
@@ -15,7 +16,7 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success, Try }
 
 @Singleton
-class BankState {
+class BankServiceState {
   private var bank = Bank(200)
 
   // hackish way to make this idempotent that will beautifully OOM at some point ^^
@@ -57,7 +58,7 @@ case class DepositOkReponse(txid: Int, message: String, change: Change)
  * Entry point for the bank service. Mostly only json parsing and validation
  * logic is here, the actual bank and change logic is delegated to Bank
  */
-class BankService @Inject() (state: BankState) extends Controller {
+class BankService @Inject() (state: BankServiceState) extends Controller {
 
   import BankService._
 
@@ -88,7 +89,7 @@ class BankService @Inject() (state: BankState) extends Controller {
     Future {
       request.body.validate[DepositRequest] match {
 
-        case e: JsError => BadRequest(errorJsonResponse(JsError.toJson(e).toString()))
+        case e: JsError => BadRequest(Web.errorJsonResponse(JsError.toJson(e).toString()))
 
         case success: JsSuccess[DepositRequest] =>
           val req = success.get
@@ -99,12 +100,12 @@ class BankService @Inject() (state: BankState) extends Controller {
           } yield Bank(coins ++ notes)
 
           maybeTokens match {
-            case f: Failure[_] => BadRequest(errorResponse(f.exception))
+            case f: Failure[_] => BadRequest(Web.errorResponse(f.exception))
 
             case Success(tokens) =>
               state.deposit(req.txid, tokens, req.target) match {
                 case Right(response) => Ok(Json.toJson(response))
-                case Left(errorMsg) => InternalServerError(errorResponse(errorMsg))
+                case Left(errorMsg) => InternalServerError(Web.errorResponse(errorMsg))
               }
           }
       }
@@ -167,20 +168,5 @@ object BankService {
     (JsPath \ "message").write[String] and
     (JsPath \ "change").write[Change]
   )(unlift(DepositOkReponse.unapply))
-
-  def errorResponse(ex: Throwable): JsValue = errorResponse(ex.getMessage)
-
-  def errorResponse(details: String): JsValue = errorJsonResponse(s""" "$details" """)
-
-  /**
-   * Builds a JSON error response with the provided details, which must be valid json element
-   */
-  def errorJsonResponse(jsonDetails: String): JsValue =
-    Json.parse(
-      s"""{
-         |"error": "invalid deposit request",
-         |"detail": $jsonDetails
-         |}""".stripMargin
-    )
 
 }

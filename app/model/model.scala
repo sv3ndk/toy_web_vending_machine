@@ -37,3 +37,25 @@ object MoneyToken {
   }
 
 }
+
+object Item extends Enumeration {
+
+  val coke = Value("Coke")
+  val water = Value("Mineral water")
+  val orangeJuice = Value("Orange juice")
+  val smoothie = Value("Orange juice")
+
+  val chocolate = Value("Chocolate")
+  val cerealBar = Value("Cereal bar")
+  val apple = Value("Fresh apple")
+
+  val screwDriver = Value("Screw driver")
+  val usbCharger = Value("USB charger")
+  val battery = Value("Triple A battery pack")
+
+  // this is a copy-past of withValue, I just want to have a custom error message
+  def item(name: String) = Try(values.find(_.toString == name).getOrElse(
+    throw new NoSuchElementException(s"Unknown item: '$name'")
+  ))
+
+}
