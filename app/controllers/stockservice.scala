@@ -1,5 +1,8 @@
 package controllers
 
+import javax.inject.Inject
+
+import com.google.inject.Singleton
 import model.Item
 import model.Web
 import play.api.libs.json._
@@ -13,8 +16,17 @@ import scala.util.{ Failure, Success, Try }
 case class PriceResponse(item: String, price: Int)
 case class ItemQuantity(item: String, quantity: Int)
 case class TotalPriceResponse(items: Seq[ItemQuantity], price: Int)
+case class StockLevels(items: Seq[ItemQuantity])
 
-class StockService extends Controller {
+/**
+ * Non thread-safe state of the stock service.
+ */
+@Singleton
+class StockServiceState {
+  var stock = new Stock(levels = Item.values.map(_ -> 100).toMap)
+}
+
+class StockService @Inject() (state: StockServiceState) extends Controller {
 
   import StockService._
 
@@ -54,11 +66,26 @@ class StockService extends Controller {
           case f: Failure[_] => BadRequest(Web.errorResponse(f.exception))
 
           case Success(parsedItems) =>
+
             val response = TotalPriceResponse(items, Stock.getTotalPrice(parsedItems))
             Ok(Json.toJson(response))
         }
     }
   }
+
+  /**
+   * return the current stock levels
+   */
+  def currentStock = Action {
+
+    val levels = StockLevels(
+      state.stock.levels.toSeq.map {
+        case (it, qt) => ItemQuantity(it.toString, qt)
+      }
+    )
+    Ok(Json.toJson(levels))
+  }
+
 }
 
 object StockService {
@@ -97,6 +124,10 @@ object StockService {
     (JsPath \ "items").write[Seq[ItemQuantity]] and
     (JsPath \ "price").write[Int]
   )(unlift(TotalPriceResponse.unapply))
+
+  implicit val stockLevelsWrite: Writes[StockLevels] =
+    (JsPath \ "items").write[Seq[ItemQuantity]]
+      .contramap(unlift(StockLevels.unapply))
 
 }
 
