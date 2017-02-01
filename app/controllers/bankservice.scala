@@ -134,7 +134,7 @@ object BankService {
 
   def parseTokens[T <: MoneyToken](parse: Int => Try[T])(coinValues: Seq[Int]) =
     coinValues
-      .foldLeft(Success(List.empty[MoneyToken]): Try[List[MoneyToken]]) { (maybeAgg, nextRawCoin) =>
+      .foldLeft(Try(List.empty[MoneyToken])) { (maybeAgg, nextRawCoin) =>
         maybeAgg match {
           case meh: Failure[_] => meh
           case Success(okSoFar) => parse(nextRawCoin) match {

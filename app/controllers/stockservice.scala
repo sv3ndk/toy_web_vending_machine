@@ -1,5 +1,6 @@
 package controllers
 
+import java.util.concurrent.Executors
 import javax.inject.Inject
 
 import com.google.inject.Singleton
@@ -11,6 +12,7 @@ import play.api.libs.functional.syntax._
 import vending.Stock
 import play.api.Logger
 
+import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success, Try }
 
 case class PriceResponse(item: String, price: Int)
@@ -24,6 +26,20 @@ case class StockLevels(items: Seq[ItemQuantity])
 @Singleton
 class StockServiceState {
   var stock = new Stock(levels = Item.values.map(_ -> 100).toMap)
+
+  /**
+   * Tries to apply all the delta provided in the list. If all successful,
+   * we replace the stock with the new one
+   */
+  def incLevels(update: List[(Item.Value, Int)]): Try[Unit] = {
+    stock.incLevels(update) match {
+      case Success(updatedStock) =>
+        stock = updatedStock
+        Success(Unit)
+
+      case f: Failure[_] => Failure[Unit](f.exception)
+    }
+  }
 }
 
 class StockService @Inject() (state: StockServiceState) extends Controller {
@@ -86,9 +102,42 @@ class StockService @Inject() (state: StockServiceState) extends Controller {
     Ok(Json.toJson(levels))
   }
 
+  /**
+   * Update the stocks by adding the specified quantities to each item
+   * (quantities may be negative)
+   */
+  def updateStock = Action.async(BodyParsers.parse.json) { request =>
+
+    Future {
+
+      request.body.validate[Seq[ItemQuantity]] match {
+        case e: JsError => BadRequest(Web.errorJsonResponse(JsError.toJson(e).toString()))
+
+        case success: JsSuccess[Seq[ItemQuantity]] =>
+          val addedItems = success.value
+
+          parseItemsQuantities(addedItems) match {
+            case f: Failure[_] => BadRequest(Web.errorResponse(f.exception))
+
+            case Success(parsedItems) =>
+              state.incLevels(parsedItems) match {
+                case Success(_) => Ok
+                case f: Failure[_] => InternalServerError(Web.errorResponse(f.exception))
+              }
+          }
+      }
+
+    }(monothreadEc)
+
+  }
+
 }
 
 object StockService {
+
+  val monothreadEc = ExecutionContext.fromExecutor(
+    Executors.newFixedThreadPool(1)
+  )
 
   implicit val priceResponseWrite: Writes[PriceResponse] = (
     (JsPath \ "item").write[String] and
@@ -108,7 +157,7 @@ object StockService {
       itemQuantity =>
         Item.item(itemQuantity.item)
           .map((_, itemQuantity.quantity))
-    }.foldLeft(Success(List.empty[(Item.Value, Int)]): Try[List[(Item.Value, Int)]]) {
+    }.foldLeft(Try(List.empty[(Item.Value, Int)])) {
       case (agg, next) => next match {
         case Success(tuple) => agg.map(tuple :: _)
         case f: Failure[_] => Failure(f.exception)

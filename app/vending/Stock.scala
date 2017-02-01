@@ -22,6 +22,15 @@ case class Stock(levels: Map[Item.Value, Int]) {
       Success(this.copy(levels = levels + (item -> newQuantity)))
   }
 
+  /**
+   * bulk update: adds or remove (if quantity is negative) some items to/from this stock.
+   */
+  def incLevels(update: List[(Item.Value, Int)]): Try[Stock] =
+    update.foldLeft(Try(this)) {
+      case (failedBefore: Failure[Stock], _) => failedBefore
+      case (Success(currentStock), (item, quantity)) =>
+        currentStock.incLevels(item, quantity)
+    }
 }
 
 object Stock {
