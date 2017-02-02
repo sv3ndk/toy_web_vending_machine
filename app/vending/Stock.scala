@@ -8,28 +8,28 @@ import scala.util.{ Failure, Success, Try }
 case class Stock(levels: Map[Item.Value, Int]) {
 
   /**
-   * adds or remove (if quantity is negative) some items to/from this stock.
+   * adds or remove (if delta is negative) some items to/from this stock.
    */
-  def incLevels(item: Item.Value, quantity: Int): Try[Stock] = {
+  def incLevels(item: Item.Value, delta: Int): Try[Stock] = {
 
-    val newQuantity = levels.getOrElse(item, 0) + quantity
+    val newQuantity = levels.getOrElse(item, 0) + delta
 
     if (newQuantity < 0)
       Failure(
-        new IllegalArgumentException(s"Refusing to add $quantity $item to stock: that would make the stock level negative")
+        new IllegalArgumentException(s"Refusing to add $delta $item to stock: that would make the stock level negative")
       )
     else
       Success(this.copy(levels = levels + (item -> newQuantity)))
   }
 
   /**
-   * bulk update: adds or remove (if quantity is negative) some items to/from this stock.
+   * bulk update: adds or remove (if delta is negative) some items to/from this stock.
    */
   def incLevels(update: List[(Item.Value, Int)]): Try[Stock] =
     update.foldLeft(Try(this)) {
       case (failedBefore: Failure[Stock], _) => failedBefore
-      case (Success(currentStock), (item, quantity)) =>
-        currentStock.incLevels(item, quantity)
+      case (Success(currentStock), (item, delta)) =>
+        currentStock.incLevels(item, delta)
     }
 }
 
