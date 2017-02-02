@@ -5,7 +5,7 @@ import javax.inject.Inject
 
 import com.google.inject.Singleton
 import model.Item
-import model.Web
+import model.Web._
 import play.api.libs.json._
 import play.api.mvc.{ Action, BodyParsers, Controller }
 import play.api.libs.functional.syntax._
@@ -16,7 +16,6 @@ import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success, Try }
 
 case class PriceResponse(item: String, price: Int)
-case class ItemQuantity(item: String, quantity: Int)
 case class TotalPriceResponse(items: Seq[ItemQuantity], price: Int)
 case class StockLevels(items: Seq[ItemQuantity])
 
@@ -58,7 +57,7 @@ class StockService @Inject() (state: StockServiceState) extends Controller {
   def price(itemName: String) = Action {
 
     Item.item(itemName) match {
-      case f: Failure[_] => BadRequest(Web.errorResponse(f.exception))
+      case f: Failure[_] => BadRequest(errorResponse(f.exception))
 
       case Success(item) =>
         val response = PriceResponse(itemName, Stock.getPrice(item))
@@ -79,13 +78,13 @@ class StockService @Inject() (state: StockServiceState) extends Controller {
   def totalPrice = Action(BodyParsers.parse.json) { request =>
 
     request.body.validate[Seq[ItemQuantity]] match {
-      case e: JsError => BadRequest(Web.errorJsonResponse(JsError.toJson(e).toString()))
+      case e: JsError => BadRequest(errorJsonResponse(JsError.toJson(e).toString()))
 
       case success: JsSuccess[Seq[ItemQuantity]] =>
         val items = success.value
 
         parseItemsQuantities(items) match {
-          case f: Failure[_] => BadRequest(Web.errorResponse(f.exception))
+          case f: Failure[_] => BadRequest(errorResponse(f.exception))
 
           case Success(parsedItems) =>
 
@@ -117,18 +116,18 @@ class StockService @Inject() (state: StockServiceState) extends Controller {
     Future {
 
       request.body.validate[UpdateStockRequest] match {
-        case e: JsError => BadRequest(Web.errorJsonResponse(JsError.toJson(e).toString()))
+        case e: JsError => BadRequest(errorJsonResponse(JsError.toJson(e).toString()))
 
         case success: JsSuccess[UpdateStockRequest] =>
           val req = success.value
 
           parseItemsQuantities(req.deltas) match {
-            case f: Failure[_] => BadRequest(Web.errorResponse(f.exception))
+            case f: Failure[_] => BadRequest(errorResponse(f.exception))
 
             case Success(parsedItems) =>
               state.incLevels(req.txid, parsedItems) match {
                 case Success(_) => Ok
-                case f: Failure[_] => InternalServerError(Web.errorResponse(f.exception))
+                case f: Failure[_] => InternalServerError(errorResponse(f.exception))
               }
           }
       }
@@ -148,31 +147,6 @@ object StockService {
     (JsPath \ "item").write[String] and
     (JsPath \ "price").write[Int]
   )(unlift(PriceResponse.unapply))
-
-  implicit val itemQuantityRead: Reads[ItemQuantity] = (
-    (JsPath \ "item").read[String] and
-    (JsPath \ "quantity").read[Int](Reads.min(0))
-  )(ItemQuantity.apply _)
-
-  /**
-   * parse items into enumeration
-   */
-  def parseItemsQuantities(items: Seq[ItemQuantity]) =
-    items.map {
-      itemQuantity =>
-        Item.item(itemQuantity.item)
-          .map((_, itemQuantity.quantity))
-    }.foldLeft(Try(List.empty[(Item.Value, Int)])) {
-      case (agg, next) => next match {
-        case Success(tuple) => agg.map(tuple :: _)
-        case f: Failure[_] => Failure(f.exception)
-      }
-    }
-
-  implicit val itemQuantityWrite: Writes[ItemQuantity] = (
-    (JsPath \ "item").write[String] and
-    (JsPath \ "quantity").write[Int]
-  )(unlift(ItemQuantity.unapply))
 
   implicit val totalPriceResponseWrite: Writes[TotalPriceResponse] = (
     (JsPath \ "items").write[Seq[ItemQuantity]] and

@@ -8,11 +8,12 @@ There are 3 json/REST web services:
 
 - a public VendingMachine API that exposes the item buying features, though actually delegates the execution to the two other WS instead. 
 
-- a Bank WS, basically an idempotent container of coins and notes, able to provide change
+- a Bank WS, basically a container of coins and notes, able to provide change
 
 - a Stock WS, essentially a container of the sold items.
 
-This design is on purpose a bit too convoluted for the actual needs, just as an excuse to play around with error handling while coordinating state mutations into several WS.
+This design is on purpose a bit too convoluted for the actual needs.. err, there _are_ no needs actually, I  
+just code around and play with error handling while coordinating state mutations into several WS.
  
 The state is just maintained as an in-memory instance for now so the thingy is neither scalable nor restartable nor anything. 
 
@@ -42,7 +43,7 @@ mechanism would work around that, maybe by using actors.
 
 # Tests and simulation
 
-There's a request simulator that allows  to generate tons of purchase and restock requests, both via internal calls as well as WS requests.   
+There's a request simulator that allows to generate tons of purchase and restock requests, both via internal calls as well as WS requests.   
 
 
 # Deployment and (no) monitoring

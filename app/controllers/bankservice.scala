@@ -84,12 +84,7 @@ class BankService @Inject() (state: BankServiceState) extends Controller {
         case success: JsSuccess[DepositRequest] =>
           val req = success.get
 
-          val maybeTokens = for {
-            coins <- parseCoins(req.coins)
-            notes <- parseNotes(req.notes)
-          } yield Bank(coins ++ notes)
-
-          maybeTokens match {
+          Web.parseTokens(req.coins, req.notes) match {
             case f: Failure[_] => BadRequest(Web.errorResponse(f.exception))
 
             case Success(tokens) =>
@@ -112,27 +107,6 @@ object BankService {
   val monothreadEc = ExecutionContext.fromExecutor(
     Executors.newFixedThreadPool(1)
   )
-  /**
-   * Attempts to parse this sequence of coin values into the corresponding sequence of MoneyTokens
-   */
-  def parseCoins = parseTokens(MoneyToken.coin) _
-
-  /**
-   * Attempts to parse this sequence of note values into the corresponding sequence of MoneyTokens
-   */
-  def parseNotes = parseTokens(MoneyToken.note) _
-
-  def parseTokens[T <: MoneyToken](parse: Int => Try[T])(coinValues: Seq[Int]) =
-    coinValues
-      .foldLeft(Try(List.empty[MoneyToken])) { (maybeAgg, nextRawCoin) =>
-        maybeAgg match {
-          case meh: Failure[_] => meh
-          case Success(okSoFar) => parse(nextRawCoin) match {
-            case Success(coin) => Success(coin :: okSoFar)
-            case f: Failure[MoneyToken] => Failure(f.exception)
-          }
-        }
-      }.map(_.reverse)
 
   /**
    * parser of an inbound Json deposit request into the corresponding case class
