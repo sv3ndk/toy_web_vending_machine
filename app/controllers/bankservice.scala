@@ -19,33 +19,23 @@ import scala.util.{ Failure, Success, Try }
 class BankServiceState {
   private var bank = Bank(200)
 
-  // hackish way to make this idempotent that will beautifully OOM at some point ^^
-  private var knownTxIds = Map[Int, Either[String, DepositOkReponse]]()
-
   def total = bank.total
 
-  /**
-   * Non thread-safe idempotent state update
-   */
-  def deposit(txid: Int, added: Bank, targetAmount: Int): Either[String, DepositOkReponse] = {
+  private def _deposit(added: Bank, targetAmount: Int, txid: Int): Try[DepositOkReponse] =
+    bank.deposit(added, targetAmount) match {
+      case Success((updatedBank, change)) =>
+        bank = updatedBank
+        Success(DepositOkReponse(
+          txid = txid,
+          message = "deposit accepted",
+          change = Change(change.coinsValue, change.notesValue)
+        ))
 
-    if (!(knownTxIds contains txid)) {
-      val result = bank.deposit(added, targetAmount) match {
-        case Right((updatedBank, change)) =>
-          bank = updatedBank
-          Right(DepositOkReponse(
-            txid = txid, message = "deposit accepted",
-            change = Change(change.coinsValue, change.notesValue)
-          ))
-
-        case Left(errorMsg) => Left(errorMsg)
-      }
-
-      knownTxIds += (txid -> result)
+      case f: Failure[_] => Failure[DepositOkReponse](f.exception)
     }
 
-    knownTxIds(txid)
-  }
+  var deposit = Idempotent(_deposit _)
+
 }
 
 case class BalanceResponse(balance: Int)
@@ -103,9 +93,9 @@ class BankService @Inject() (state: BankServiceState) extends Controller {
             case f: Failure[_] => BadRequest(Web.errorResponse(f.exception))
 
             case Success(tokens) =>
-              state.deposit(req.txid, tokens, req.target) match {
-                case Right(response) => Ok(Json.toJson(response))
-                case Left(errorMsg) => InternalServerError(Web.errorResponse(errorMsg))
+              state.deposit(req.txid, (tokens, req.target)) match {
+                case Success(response) => Ok(Json.toJson(response))
+                case f: Failure[DepositOkReponse] => InternalServerError(Web.errorResponse(f.exception))
               }
           }
       }

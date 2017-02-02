@@ -24,7 +24,7 @@ trait Bank {
 
   val total: Int
 
-  def deposit(added: Bank, targetAmount: Int): Either[String, (Bank, Bank)]
+  def deposit(added: Bank, targetAmount: Int): Try[(Bank, Bank)]
 }
 
 object Bank {
@@ -96,24 +96,30 @@ object Bank {
      * If the operation succeeds, the operation returns the updated Bank plus maybe some change.
      * Otherwise (e.g. there's not enough change in the bank), we simply return None
      */
-    def deposit(added: Bank, targetAmount: Int): Either[String, (Bank, Bank)] =
+    def deposit(added: Bank, targetAmount: Int): Try[(Bank, Bank)] =
       if (added.total < targetAmount)
-        Left(s"value of provided coin and notes (${added.total}) is lower then target amount: $targetAmount")
+        Failure(
+          new IllegalArgumentException(
+            s"value of provided coin and notes (${added.total}) is lower then target amount: $targetAmount"
+          )
+        )
 
       else {
 
         @tailrec
-        def _deposit(toVisit: Bank, discarded: Bank, change: Bank, remainingToPay: Int): Either[String, (Bank, Bank)] = {
+        def _deposit(toVisit: Bank, discarded: Bank, change: Bank, remainingToPay: Int): Try[(Bank, Bank)] = {
 
           if (remainingToPay == 0)
-            Right(toVisit + discarded, change)
+            Success((toVisit + discarded, change))
 
           else {
 
             val (moreDiscarded, nextCoins) = toVisit.tokens.partition(_.value > remainingToPay)
 
             nextCoins match {
-              case Nil => Left("Currently enable to provide change for the specified deposit")
+              case Nil => Failure(
+                new IllegalStateException("Currently enable to provide change for the specified deposit")
+              )
               case returnedCoin :: rest => _deposit(
                 toVisit = Bank(rest),
                 discarded = discarded + moreDiscarded,

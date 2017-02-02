@@ -20,6 +20,8 @@ case class ItemQuantity(item: String, quantity: Int)
 case class TotalPriceResponse(items: Seq[ItemQuantity], price: Int)
 case class StockLevels(items: Seq[ItemQuantity])
 
+case class UpdateStockRequest(txid: Int, deltas: Seq[ItemQuantity])
+
 /**
  * Non thread-safe state of the stock service.
  */
@@ -31,7 +33,7 @@ class StockServiceState {
    * Tries to apply all the delta provided in the list. If all successful,
    * we replace the stock with the new one
    */
-  def incLevels(update: List[(Item.Value, Int)]): Try[Unit] = {
+  private def _incLevels(update: List[(Item.Value, Int)], txId: Int): Try[Unit] = {
     stock.incLevels(update) match {
       case Success(updatedStock) =>
         stock = updatedStock
@@ -40,6 +42,10 @@ class StockServiceState {
       case f: Failure[_] => Failure[Unit](f.exception)
     }
   }
+
+  // we only save the request after they're parsed successfully
+  val incLevels = Idempotent(_incLevels _)
+
 }
 
 class StockService @Inject() (state: StockServiceState) extends Controller {
@@ -110,17 +116,17 @@ class StockService @Inject() (state: StockServiceState) extends Controller {
 
     Future {
 
-      request.body.validate[Seq[ItemQuantity]] match {
+      request.body.validate[UpdateStockRequest] match {
         case e: JsError => BadRequest(Web.errorJsonResponse(JsError.toJson(e).toString()))
 
-        case success: JsSuccess[Seq[ItemQuantity]] =>
-          val addedItems = success.value
+        case success: JsSuccess[UpdateStockRequest] =>
+          val req = success.value
 
-          parseItemsQuantities(addedItems) match {
+          parseItemsQuantities(req.deltas) match {
             case f: Failure[_] => BadRequest(Web.errorResponse(f.exception))
 
             case Success(parsedItems) =>
-              state.incLevels(parsedItems) match {
+              state.incLevels(req.txid, parsedItems) match {
                 case Success(_) => Ok
                 case f: Failure[_] => InternalServerError(Web.errorResponse(f.exception))
               }
@@ -128,7 +134,6 @@ class StockService @Inject() (state: StockServiceState) extends Controller {
       }
 
     }(monothreadEc)
-
   }
 
 }
@@ -177,6 +182,11 @@ object StockService {
   implicit val stockLevelsWrite: Writes[StockLevels] =
     (JsPath \ "items").write[Seq[ItemQuantity]]
       .contramap(unlift(StockLevels.unapply))
+
+  implicit val updateStockRequestRead: Reads[UpdateStockRequest] = (
+    (JsPath \ "txid").read[Int] and
+    (JsPath \ "deltas").read[Seq[ItemQuantity]]
+  )(UpdateStockRequest.apply _)
 
 }
 
