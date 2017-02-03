@@ -4,8 +4,8 @@ import model.Item
 import org.scalacheck.Gen._
 
 /**
-  * Just a bunch of handy generators
-  */
+ * Just a bunch of handy generators
+ */
 object VendingGens {
 
   val item = oneOf(Item.values.toSeq)
@@ -15,13 +15,11 @@ object VendingGens {
   val uniqueItems = items.map(_.distinct)
 
   /**
-    * Generator of list of item->positiveDelta,
-    * each item being present only once
-    * */
+   * Generator of list of item->positiveDelta,
+   * each item being present only once
+   */
   val posDeltas = uniqueItems.flatMap(items =>
     listOfN(items.length, posNum[Int])
-      .map(deltas => items.zip(deltas))
-  )
-
+      .map(deltas => items.zip(deltas)))
 
 }

@@ -66,14 +66,32 @@ object Web {
         }
       }.map(_.reverse)
 
-  def errorResponse(ex: Throwable): JsValue = errorResponse(ex.getMessage)
+  case class TotalPriceResponse(items: Seq[ItemQuantity], price: Int)
 
-  def errorResponse(details: String): JsValue = errorJsonResponse(s""" "$details" """)
+  implicit val totalPriceResponseWrite: Writes[TotalPriceResponse] = (
+    (JsPath \ "items").write[Seq[ItemQuantity]] and
+    (JsPath \ "price").write[Int]
+  )(unlift(TotalPriceResponse.unapply))
 
-  /**
-   * Builds a JSON error response with the provided details, which must be valid json element
-   */
-  def errorJsonResponse(jsonDetails: String): JsValue =
-    Json.parse(s"""{"error": $jsonDetails}""")
+  implicit val totalPriceResponseRead: Reads[TotalPriceResponse] = (
+    (JsPath \ "items").read[Seq[ItemQuantity]] and
+    (JsPath \ "price").read[Int]
+  )(TotalPriceResponse.apply _)
+
+  def errorResponse(msg: String, ex: Throwable): JsValue =
+    errorResponse(msg, ex.getMessage)
+
+  def errorResponse(msg: String, details: String): JsValue =
+    jsonErrorResponse(msg, Json.toJson(details))
+
+  def jsonErrorResponse(msg: String, jsonError: JsError): JsValue =
+    jsonErrorResponse(msg, JsError.toJson(jsonError))
+
+  def jsonErrorResponse(msg: String, jsonDetails: JsValue): JsValue =
+    Json.obj("error" ->
+      Json.obj(
+        "message" -> msg,
+        "detail" -> jsonDetails
+      ))
 
 }

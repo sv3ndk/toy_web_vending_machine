@@ -1,66 +1,64 @@
 package vending
 
-import controllers.BankService
 import org.scalacheck.Gen
 import org.scalatest.prop.PropertyChecks
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.{ FlatSpec, Matchers }
 import model.MoneyToken
 import MoneyToken._
 
-import scala.util.{Failure, Success}
+import scala.util.{ Failure, Success, Try }
 
 class TestBank extends FlatSpec with Matchers {
 
   "empty Bank" should "be the same thing as a Bank containing nothing" in {
     val e = Bank(0)
     val e2 = Bank(Nil)
-    e should be (Bank.empty)
-    e2 should be (Bank.empty)
+    e should be(Bank.empty)
+    e2 should be(Bank.empty)
 
-
-    e.total should be (0)
-    e2.total should be (0)
-    Bank.empty.total should be (0)
+    e.total should be(0)
+    e2.total should be(0)
+    Bank.empty.total should be(0)
   }
 
   "pack of one of each" should "contain exactly one of each token" in {
 
     // just the coin of 1EUR
-    Bank.justOne should be (Bank(total=1))
+    Bank.justOne should be(Bank(total = 1))
 
     // coins of 1EUR and 2EUR
-    Bank.toTwo should be (Bank(total=3))
+    Bank.toTwo should be(Bank(total = 3))
 
     // coins of 1EUR, 2EUR and 5 EUR
-    Bank.toFive should be (Bank(total=8))
+    Bank.toFive should be(Bank(total = 8))
 
     // coins of 1EUR, 2EUR, 5EUR and 10 EUR
-    Bank.toTen should be (Bank(total=18))
+    Bank.toTen should be(Bank(total = 18))
 
     // coins of 1EUR, 2EUR, 5EUR, 10 EUR and 20 EUR
-    Bank.toTwenty should be (Bank(total=38))
+    Bank.toTwenty should be(Bank(total = 38))
 
     // coins of 1EUR, 2EUR, 5EUR, 10 EUR, 20 EUR and 50 EUR
-    Bank.oneOfEach should be (Bank(total=88))
+    Bank.oneOfEach should be(Bank(total = 88))
 
   }
 
-  " adding exact amount" should "yield the bank with just the tokens added and no change" in  {
+  " adding exact amount" should "yield the bank with just the tokens added and no change" in {
 
     val orig = Bank(MoneyToken.five :: MoneyToken.five :: MoneyToken.one :: Nil)
 
-    orig.deposit(Bank(2), 2) should be (Right(
-      Bank(MoneyToken.five :: MoneyToken.five :: MoneyToken.one :: MoneyToken.one :: MoneyToken.one ::Nil),
+    orig.deposit(Bank(2), 2) should be(Success(
+      Bank(MoneyToken.five :: MoneyToken.five :: MoneyToken.one :: MoneyToken.one :: MoneyToken.one :: Nil),
       Bank.empty
     ))
 
   }
 
-  " adding zero with a coin of one to an empty" should "yield leave the bank untouched and yield a change of one" in  {
+  " adding zero with a coin of one to an empty" should "yield leave the bank untouched and yield a change of one" in {
 
     val emptyBank = Bank(0)
 
-    emptyBank.deposit(Bank(1), 0) should be (Right(
+    emptyBank.deposit(Bank(1), 0) should be(Success(
       // updated bank should still be empty
       emptyBank,
 
@@ -69,11 +67,11 @@ class TestBank extends FlatSpec with Matchers {
     ))
   }
 
-  " adding zero with a coin of one to a small bank" should "leave the bank untouched and yield a change of one" in  {
+  " adding zero with a coin of one to a small bank" should "leave the bank untouched and yield a change of one" in {
 
     val smallBank = Bank(1)
 
-    smallBank.deposit(Bank(1), 0) should be (Right(
+    smallBank.deposit(Bank(1), 0) should be(Success(
       // updated bank should still be empty
       smallBank,
 
@@ -82,66 +80,34 @@ class TestBank extends FlatSpec with Matchers {
     ))
   }
 
-  "adding 8 dollars" should "update the bank and produce some change" in  {
+  "adding 8 dollars" should "update the bank and produce some change" in {
 
     val smallBank = Bank(five :: five :: one :: two :: Nil)
-    val deposit = Bank (ten)
+    val deposit = Bank(ten)
     val targetAmount = 8
 
-    smallBank.deposit(deposit, targetAmount) should be (Right(
+    smallBank.deposit(deposit, targetAmount) should be(Success(
       // ten note should have been added, two coing should have been removed
-      Bank(ten :: five :: five :: one ::  Nil),
+      Bank(ten :: five :: five :: one :: Nil),
 
       // returned change should be 1
       Bank(two)
     ))
   }
 
-  " adding 8 dollars" should "fail due to lack of change" in  {
-
-
+  " adding 8 dollars" should "fail due to lack of change" in {
 
     // the bank cannot change this at the moment: we do not have enough coin!
     val smallBank = Bank(five :: five :: one :: Nil)
-    val deposit = Bank (ten)
+    val deposit = Bank(ten)
     val targetAmount = 8
 
-    smallBank.deposit(deposit, targetAmount) shouldEqual Left("Currently enable to provide change for the specified deposit")
-  }
-
-
-  "parsing valid set of coin" should "produce a successful list of money token" in  {
-    val parsed = BankService.parseCoins(1 :: 1 :: 1:: 2 :: 2 :: 1 :: Nil)
-    parsed shouldEqual Success(one :: one :: one :: two :: two :: one :: Nil)
-  }
-
-  "parsing an empty set of coin" should "produce a successful emtpy list of money token" in  {
-    val parsed = BankService.parseCoins( List.empty[Int])
-    parsed shouldEqual Success(Nil)
-  }
-
-  "parsing invalid set of coins" should "produce a Failure" in  {
-    val parsed = BankService.parseCoins(1 :: 18 :: 1:: 2 :: 2 :: 1 :: Nil)
-    parsed should matchPattern { case _: Failure[List[MoneyToken]] => }
-  }
-
-  "parsing valid set of notes" should "produce a successful list of money token" in  {
-    val parsed = BankService.parseNotes(5 :: 10 :: 5:: 20 :: 50 :: 10 :: Nil)
-    parsed shouldEqual(Success(five :: ten :: five :: twenty :: fifty :: ten :: Nil))
-  }
-
-  "parsing an empty set of notes" should "produce a successful emtpy list of money token" in  {
-    val parsed = BankService.parseNotes( List.empty[Int])
-    parsed shouldEqual(Success(Nil))
-  }
-
-  "parsing invalid set of notes" should "produce a Failure" in  {
-    val parsed = BankService.parseNotes(1 :: 18 :: 1:: 2 :: 2 :: 1 :: Nil)
-    parsed should matchPattern { case _: Failure[List[MoneyToken]] => }
+    smallBank.deposit(deposit, targetAmount) should matchPattern {
+      case _: Failure[_] =>
+    }
   }
 
 }
-
 
 class TestBankChecks extends FlatSpec with PropertyChecks with Matchers {
 
@@ -162,7 +128,6 @@ class TestBankChecks extends FlatSpec with PropertyChecks with Matchers {
           withClue(s"total of ${Bank(n)} should be $n") {
             Bank(n).total shouldEqual n
 
-
           }
         }
     }
@@ -174,7 +139,7 @@ class TestBankChecks extends FlatSpec with PropertyChecks with Matchers {
         whenever(startAmount >= 0 && added >= 0) {
 
           // cannot be None => forcing get
-          val (updatedBank, change) = Bank(startAmount).deposit(Bank(added), added).right.get
+          val (updatedBank, change) = Bank(startAmount).deposit(Bank(added), added).get
 
           change should be(Bank.empty)
           updatedBank.total shouldEqual startAmount + added
@@ -182,41 +147,37 @@ class TestBankChecks extends FlatSpec with PropertyChecks with Matchers {
     }
   }
 
-
   "depositing zero dollars" should "leave the bank untouched and yield some change" in {
     forAll((amount, "bankCash"), (amount, "change")) {
-      (bankCash: Int, change: Int) => {
+      (bankCash: Int, change: Int) =>
+        {
 
-        val (updatedBank, obtainedChange) = Bank(bankCash).deposit(Bank(change), targetAmount = 0).right.get
+          val (updatedBank, obtainedChange) = Bank(bankCash).deposit(Bank(change), targetAmount = 0).get
 
-        withClue("bank should be exactly as before") {updatedBank should be (updatedBank)}
-        withClue("all provided money should be returned") {obtainedChange.total should be(change)}
+          withClue("bank should be exactly as before") { updatedBank should be(updatedBank) }
+          withClue("all provided money should be returned") { obtainedChange.total should be(change) }
 
-      }
+        }
     }
   }
 
   "depositing some amount to a bank having the necessary change" should
     "produce a bank with more money + some change back" in {
-    forAll((amount, "bankCash"), (amount, "deposit"), (amount, "change")) {
-      (bankCash: Int, deposit: Int, change: Int) => {
+      forAll((amount, "bankCash"), (amount, "deposit"), (amount, "change")) {
+        (bankCash: Int, deposit: Int, change: Int) =>
+          {
 
-        // build the bank this way makes sure it contains the coins to build up the returned change
-        val bank = Bank(bankCash) + Bank(change)
+            // build the bank this way makes sure it contains the coins to build up the returned change
+            val bank = Bank(bankCash) + Bank(change)
 
-        // we deposit too much (deposit + change) and expect change in return
-        val (updatedBank, obtainedChange) = bank.deposit(Bank(deposit+change), targetAmount=deposit).right.get
+            // we deposit too much (deposit + change) and expect change in return
+            val (updatedBank, obtainedChange) = bank.deposit(Bank(deposit + change), targetAmount = deposit).get
 
-        withClue("change should be the full provided amount") {obtainedChange.total should be (change)}
-        withClue("bank should have been updated") {updatedBank.total shouldEqual bankCash + change + deposit}
+            withClue("change should be the full provided amount") { obtainedChange.total should be(change) }
+            withClue("bank should have been updated") { updatedBank.total shouldEqual bankCash + change + deposit }
+          }
       }
     }
-  }
-
-
-
-
 
 }
-
 

@@ -79,18 +79,19 @@ class BankService @Inject() (state: BankServiceState) extends Controller {
     Future {
       request.body.validate[DepositRequest] match {
 
-        case e: JsError => BadRequest(Web.errorJsonResponse(JsError.toJson(e).toString()))
+        case e: JsError => BadRequest(Web.jsonErrorResponse("invalid deposit json request", e))
 
         case success: JsSuccess[DepositRequest] =>
           val req = success.get
 
           Web.parseTokens(req.coins, req.notes) match {
-            case f: Failure[_] => BadRequest(Web.errorResponse(f.exception))
+            case f: Failure[_] => BadRequest(Web.errorResponse("invalid tokens in deposit json request", f.exception))
 
             case Success(tokens) =>
               state.deposit(req.txid, (tokens, req.target)) match {
                 case Success(response) => Ok(Json.toJson(response))
-                case f: Failure[DepositOkReponse] => InternalServerError(Web.errorResponse(f.exception))
+                case f: Failure[DepositOkReponse] =>
+                  InternalServerError(Web.errorResponse("error while applying deposit", f.exception))
               }
           }
       }
