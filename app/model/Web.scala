@@ -15,7 +15,7 @@ object Web {
 
   implicit val itemQuantityRead: Reads[ItemQuantity] = (
     (JsPath \ "item").read[String] and
-    (JsPath \ "quantity").read[Int](Reads.min(0))
+    (JsPath \ "quantity").read[Int] // there is no check for non-negativity here: negative quantity are possible to remove stuff
   )(ItemQuantity.apply _)
 
   /**
@@ -77,6 +77,67 @@ object Web {
     (JsPath \ "items").read[Seq[ItemQuantity]] and
     (JsPath \ "price").read[Int]
   )(TotalPriceResponse.apply _)
+
+  case class DepositRequest(txid: Int, targetAmount: Int, coins: Seq[Int], notes: Seq[Int])
+
+  object DepositRequest {
+    def build(txid: Int, targetAmount: Int, bank: Bank): DepositRequest =
+      DepositRequest(txid, targetAmount, bank.coinsValue, bank.notesValue)
+  }
+
+  case class Change(coins: List[Int], notes: List[Int])
+  case class DepositOkResponse(txid: Int, message: String, change: Change)
+
+  /**
+   * parser of an inbound Json deposit request into the corresponding case class
+   */
+  implicit val depositRequestRead: Reads[DepositRequest] = (
+    (JsPath \ "txid").read[Int](Reads.min(0)) and
+    (JsPath \ "target_amount").read[Int](Reads.min(0)) and
+    (JsPath \ "tokens" \ "coins").read[Seq[Int]] and
+    (JsPath \ "tokens" \ "notes").read[Seq[Int]]
+  )(DepositRequest.apply _)
+
+  implicit val depositRequestWrite: Writes[DepositRequest] = (
+    (JsPath \ "txid").write[Int] and
+    (JsPath \ "target_amount").write[Int] and
+    (JsPath \ "tokens" \ "coins").write[Seq[Int]] and
+    (JsPath \ "tokens" \ "notes").write[Seq[Int]]
+  )(unlift(DepositRequest.unapply))
+
+  implicit val changeWrite: Writes[Change] = (
+    (JsPath \ "coins").write[List[Int]] and
+    (JsPath \ "notes").write[List[Int]]
+  )(unlift(Change.unapply))
+
+  implicit val changeRead: Reads[Change] = (
+    (JsPath \ "coins").read[List[Int]] and
+    (JsPath \ "notes").read[List[Int]]
+  )(Change.apply _)
+
+  implicit val depositResponseWrite: Writes[DepositOkResponse] = (
+    (JsPath \ "txid").write[Int] and
+    (JsPath \ "message").write[String] and
+    (JsPath \ "change").write[Change]
+  )(unlift(DepositOkResponse.unapply))
+
+  implicit val depositResponseRead: Reads[DepositOkResponse] = (
+    (JsPath \ "txid").read[Int] and
+    (JsPath \ "message").read[String] and
+    (JsPath \ "change").read[Change]
+  )(DepositOkResponse.apply _)
+
+  case class UpdateStockRequest(txid: Int, deltas: Seq[ItemQuantity])
+
+  implicit val updateStockRequestRead: Reads[UpdateStockRequest] = (
+    (JsPath \ "txid").read[Int] and
+    (JsPath \ "deltas").read[Seq[ItemQuantity]]
+  )(UpdateStockRequest.apply _)
+
+  implicit val updateStockRequestWrite: Writes[UpdateStockRequest] = (
+    (JsPath \ "txid").write[Int] and
+    (JsPath \ "deltas").write[Seq[ItemQuantity]]
+  )(unlift(UpdateStockRequest.unapply))
 
   def errorResponse(msg: String, ex: Throwable): JsValue =
     errorResponse(msg, ex.getMessage)

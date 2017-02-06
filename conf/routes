@@ -9,7 +9,7 @@ POST    /stock/total_price      controllers.StockService.totalPrice
 
 GET     /stock/status           controllers.StockService.currentStock
 
-POST    /stock/update           controllers.StockService.updateStock
+PUT    /stock/update           controllers.StockService.updateStock
 
 
-POST    /vending/purchase       controllers.VendingService.purchase
+PUT    /vending/purchase       controllers.VendingService.purchase

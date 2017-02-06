@@ -5,7 +5,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import model.Web
 
-import model.MoneyToken
+import model.Web._
 import play.api.mvc._
 import play.api.libs.json._
 import play.api.libs.functional.syntax._
@@ -21,17 +21,17 @@ class BankServiceState {
 
   def total = bank.total
 
-  private def _deposit(added: Bank, targetAmount: Int, txid: Int): Try[DepositOkReponse] =
+  private def _deposit(added: Bank, targetAmount: Int, txid: Int): Try[DepositOkResponse] =
     bank.deposit(added, targetAmount) match {
       case Success((updatedBank, change)) =>
         bank = updatedBank
-        Success(DepositOkReponse(
+        Success(DepositOkResponse(
           txid = txid,
           message = "deposit accepted",
           change = Change(change.coinsValue, change.notesValue)
         ))
 
-      case f: Failure[_] => Failure[DepositOkReponse](f.exception)
+      case f: Failure[_] => Failure[DepositOkResponse](f.exception)
     }
 
   var deposit = Idempotent(_deposit _)
@@ -39,10 +39,6 @@ class BankServiceState {
 }
 
 case class BalanceResponse(balance: Int)
-
-case class DepositRequest(txid: Int, target: Int, coins: Seq[Int], notes: Seq[Int])
-case class Change(coins: List[Int], notes: List[Int])
-case class DepositOkReponse(txid: Int, message: String, change: Change)
 
 /**
  * Entry point for the bank service. Mostly only json parsing and validation
@@ -88,9 +84,9 @@ class BankService @Inject() (state: BankServiceState) extends Controller {
             case f: Failure[_] => BadRequest(Web.errorResponse("invalid tokens in deposit json request", f.exception))
 
             case Success(tokens) =>
-              state.deposit(req.txid, (tokens, req.target)) match {
+              state.deposit(req.txid, (tokens, req.targetAmount)) match {
                 case Success(response) => Ok(Json.toJson(response))
-                case f: Failure[DepositOkReponse] =>
+                case f: Failure[DepositOkResponse] =>
                   InternalServerError(Web.errorResponse("error while applying deposit", f.exception))
               }
           }
@@ -109,29 +105,8 @@ object BankService {
     Executors.newFixedThreadPool(1)
   )
 
-  /**
-   * parser of an inbound Json deposit request into the corresponding case class
-   */
-  implicit val bankRead: Reads[DepositRequest] = (
-    (JsPath \ "txid").read[Int](Reads.min(0)) and
-    (JsPath \ "target_amount").read[Int](Reads.min(0)) and
-    (JsPath \ "tokens" \ "coins").read[Seq[Int]] and
-    (JsPath \ "tokens" \ "notes").read[Seq[Int]]
-  )(DepositRequest.apply _)
-
   // maybe a simpler solution was to simply use Json.format[BalanceResponse] here...
   implicit val balanceResponseWrite: Writes[BalanceResponse] =
     (JsPath \ "balance").write[Int].contramap(unlift(BalanceResponse.unapply))
-
-  implicit val changeWrite: Writes[Change] = (
-    (JsPath \ "coins").write[List[Int]] and
-    (JsPath \ "notes").write[List[Int]]
-  )(unlift(Change.unapply))
-
-  implicit val depositResponseWrite: Writes[DepositOkReponse] = (
-    (JsPath \ "txid").write[Int] and
-    (JsPath \ "message").write[String] and
-    (JsPath \ "change").write[Change]
-  )(unlift(DepositOkReponse.unapply))
 
 }

@@ -18,8 +18,6 @@ import scala.util.{ Failure, Success, Try }
 case class PriceResponse(item: String, price: Int)
 case class StockLevels(items: Seq[ItemQuantity])
 
-case class UpdateStockRequest(txid: Int, deltas: Seq[ItemQuantity])
-
 /**
  * Non thread-safe state of the stock service.
  */
@@ -76,6 +74,7 @@ class StockService @Inject() (state: StockServiceState) extends Controller {
    */
   def totalPrice = Action(BodyParsers.parse.json) { request =>
 
+    Logger.info(s"request: $request")
     request.body.validate[Seq[ItemQuantity]] match {
       case e: JsError => BadRequest(Web.jsonErrorResponse("invalid totalPrice json request", e))
 
@@ -111,6 +110,8 @@ class StockService @Inject() (state: StockServiceState) extends Controller {
    * (quantities may be negative)
    */
   def updateStock = Action.async(BodyParsers.parse.json) { request =>
+
+    Logger.info("updating stock..")
 
     Future {
 
@@ -152,11 +153,6 @@ object StockService {
   implicit val stockLevelsWrite: Writes[StockLevels] =
     (JsPath \ "items").write[Seq[ItemQuantity]]
       .contramap(unlift(StockLevels.unapply))
-
-  implicit val updateStockRequestRead: Reads[UpdateStockRequest] = (
-    (JsPath \ "txid").read[Int] and
-    (JsPath \ "deltas").read[Seq[ItemQuantity]]
-  )(UpdateStockRequest.apply _)
 
 }
 

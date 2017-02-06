@@ -41,6 +41,9 @@ A flaw in this flow is that if a failure of the coordination service itself occu
 this lead to disappearing money (which is ok, we're too materialist anyhow). I guess a CQRS + an idempotent retries 
 mechanism would work around that, maybe by using actors. 
 
+There is a basic logic for validating JSON, though things are missing: invalid json are 
+not handled, while well formed but invalid json (i.e. without the expected fields) are correctly reported as errors  
+
 # Tests and simulation
 
 There's a request simulator that allows to generate tons of purchase and restock requests, both via internal calls as well as WS requests.   

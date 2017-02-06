@@ -3,6 +3,7 @@ package controllers
 import javax.inject.Inject
 
 import model.Web
+import model._
 import model.Web._
 import play.api.libs.json._
 import play.api.libs.ws._
@@ -10,18 +11,28 @@ import play.api.libs.functional.syntax._
 import play.api.mvc._
 import play.api.libs.concurrent.Execution.Implicits._
 import vending.Bank
+import play.api.Logger
 
 import scala.concurrent.Future
 import scala.util.{ Failure, Success }
 
-case class PurchaseRequest(txId: Int, items: Seq[ItemQuantity], coins: Seq[Int], notes: Seq[Int])
+case class PurchaseRequest(txid: Int, items: Seq[ItemQuantity], coins: Seq[Int], notes: Seq[Int])
 
-case class WsCallException(error: JsValue, code: Option[Int] = None) extends Exception
+case class InvalidJsonRequestException(msg: String, jsonError: JsError) extends Exception(msg)
+
+case class InvalidRequestException(msg: String, source: Throwable) extends Exception(msg, source)
+
+case class PurchaseResponse(txid: Int, price: Int, change: Change)
+
+/**
+ * Exception while calling an external WS
+ */
+case class WsCallException(error: JsValue, code: Option[Int]) extends Exception(error.toString())
 
 object WsCallException {
 
-  def apply(message: String): WsCallException = WsCallException(Json.toJson(message))
-
+  def apply(message: String, code: Option[Int] = None): WsCallException =
+    WsCallException(Json.toJson(message), code)
 }
 
 /**
@@ -33,86 +44,103 @@ class VendingService @Inject() (ws: WSClient) extends Controller {
 
   import VendingService._
 
-  def purchase = Action.async(BodyParsers.parse.json) { implicit request =>
+  def purchase = Action.async(BodyParsers.parse.json) { request =>
 
-    request.body.validate[PurchaseRequest] match {
-      case e: JsError => Future { BadRequest(Web.jsonErrorResponse("invalid purchase json request", e)) }
+    implicit val iRequest: Request[JsValue] = request
 
-      case success: JsSuccess[PurchaseRequest] =>
+    val response = for {
 
-        val req = success.get
+      request <- Future {
+        parsePurchaseRequest(request)
+      }
 
-        val parsed = for {
-          bank <- Web.parseTokens(req.coins, req.notes)
-          itemQuantities <- Web.parseItemsQuantities(req.items)
-        } yield (bank, itemQuantities)
+      price <- totalPrice(request.items)
 
-        parsed match {
+      (paidTokens, demandedItemQantities) = parseRequestContent(request)
 
-          case f: Failure[_] => Future {
-            BadRequest(Web.errorResponse("invalid purchase json request", f.exception))
-          }
+      _ <- updateStocks(request.txid, request.items, added = false)
 
-          case Success((bank, itemQuantities)) =>
+      change <- makePayment(request.txid, paidTokens, price).recoverWith {
+        // in case the payment fails, tries to put back the items before propagating the failure
+        case throwable =>
 
-            val result = for {
-              price <- totalPrice(req.items)
-              _ <- depositMoney(bank, price)
-              response = "all good"
-            } yield response
+          Logger.warn(s"error whiled trying to deposit money, trying to roll back the stock update", throwable)
 
-            formatResponse(result)
+          // Now if this one fails or if we crash in the middle, the state becomes inconsistent, that's not good ^^
+          // Also, ugly trick: using -txid to have a non-conflicting txid that is retry-able. Don't do this at home...
+          updateStocks(-request.txid, request.items, added = true)
+          throw throwable
+      }
 
-        }
+    } yield Ok(Json.toJson(PurchaseResponse(request.txid, price, change)))
+
+    response recover {
+      case InvalidJsonRequestException(msg, jsError) =>
+        BadRequest(Web.jsonErrorResponse(msg, jsError))
+
+      case InvalidRequestException(msg, th) =>
+        BadRequest(Web.errorResponse(msg, th))
+
+      case WsCallException(js, Some(code)) =>
+        new Status(code)(Web.jsonErrorResponse("Error while calling external service", js))
+
+      case WsCallException(js, None) =>
+        InternalServerError(Web.jsonErrorResponse("Error while calling external service", js))
     }
   }
 
-  private def totalPrice(items: Seq[ItemQuantity])(implicit request: RequestHeader) =
+  private def parsePurchaseRequest(request: Request[JsValue]): PurchaseRequest =
+    request.body.validate[PurchaseRequest] match {
+      case jsError: JsError =>
+        throw InvalidJsonRequestException("invalid purchase json request", jsError)
 
-    ws
-      .url(routes.StockService.totalPrice().absoluteURL)
+      case success: JsSuccess[PurchaseRequest] => success.get
+    }
 
-      // this works because of the implicit itemQuantityWrite
-      .post(Json.toJson(items))
-      .map {
-        response =>
-          if (response.status == 200)
-            response.json.validate[TotalPriceResponse] match {
-              case resp: JsSuccess[TotalPriceResponse] => resp.get.price
-              case _: JsError =>
-                throw WsCallException("invalid response received from stock service")
-            }
-          else
-            throw WsCallException(response.json, Some(response.status))
-      }
+  private def parseRequestContent(purchaseRequest: PurchaseRequest): (Bank, List[(Item.Value, Int)]) = {
 
-  private def depositMoney(tokens: Bank, price: Int)(implicit request: RequestHeader) = {
-    if (tokens.total < price)
-      Future.failed(
-        new IllegalArgumentException(s"total value of provided coins is ${tokens.total}, which is below the total price of the requested items: $price")
-      )
-    else
-      Future.successful(Unit) // TODO
+    val parsed = for {
+      bank <- Web.parseTokens(purchaseRequest.coins, purchaseRequest.notes)
+      itemQuantities <- Web.parseItemsQuantities(purchaseRequest.items)
+    } yield (bank, itemQuantities)
+
+    parsed match {
+      case f: Failure[_] =>
+        throw InvalidRequestException("invalid purchase json request", f.exception)
+
+      case Success((bank, itemQuantities)) => (bank, itemQuantities)
+    }
   }
 
   /**
-   * reponse and error handling
+   * query the Stock Service to get the total price of the ordered items
    */
-  private def formatResponse(result: Future[String]): Future[Result] =
+  private def totalPrice(items: Seq[ItemQuantity])(implicit request: Request[JsValue]) =
+    ws.url(routes.StockService.totalPrice().absoluteURL)
+      .post(Json.toJson(items))
+      .map(WsUtils.processWsJsonResponse[TotalPriceResponse, Int](response => response.price))
 
-    result.map(message => Ok(message)) recover {
+  /**
+   * adds or remove those items to the stock
+   */
+  private def updateStocks(txid: Int, items: Seq[ItemQuantity], added: Boolean)(implicit request: Request[JsValue]) = {
 
-      // this typically happen if an error happened in some  downstream service
-      // => we mostly just propagate it up, with its original HTTP code
-      case WsCallException(err, Some(code)) =>
-        new Status(code)(Web.jsonErrorResponse("invalid purchase json request", err))
+    val itemUpdates =
+      if (added) items
+      else items.map { case ItemQuantity(it, qty) => ItemQuantity(it, -qty) }
 
-      case e: IllegalArgumentException =>
-        BadRequest(Web.errorResponse("input error during purchasing execution", e))
+    ws.url(routes.StockService.updateStock().absoluteURL)
+      .put(Json.toJson(UpdateStockRequest(txid, itemUpdates)))
+      .map { WsUtils.processWsEmptyResponse }
+  }
 
-      case e: Exception =>
-        InternalServerError(Web.errorResponse("unknown error during purchasing execution", e))
-    }
+  /**
+   * deposit the payment in the bank
+   */
+  private def makePayment(txid: Int, paidTokens: Bank, price: Int)(implicit request: Request[JsValue]) =
+    ws.url(routes.BankService.deposit().absoluteURL)
+      .put(Json.toJson(DepositRequest.build(txid, price, paidTokens)))
+      .map(WsUtils.processWsJsonResponse[DepositOkResponse, Change](response => response.change))
 
 }
 
@@ -124,5 +152,11 @@ object VendingService {
     (JsPath \ "payment" \ "coins").read[Seq[Int]] and
     (JsPath \ "payment" \ "notes").read[Seq[Int]]
   )(PurchaseRequest.apply _)
+
+  implicit val purchaseResponseWrite: Writes[PurchaseResponse] = (
+    (JsPath \ "txid").write[Int] and
+    (JsPath \ "price").write[Int] and
+    (JsPath \ "change").write[Change]
+  )(unlift(PurchaseResponse.unapply))
 
 }

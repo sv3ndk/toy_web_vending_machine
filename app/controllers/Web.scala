@@ -1,5 +1,9 @@
 package controllers
 
+import model.Web.TotalPriceResponse
+import play.api.libs.json.{ JsError, JsSuccess, Reads }
+import play.api.libs.ws.WSResponse
+
 import scala.util.{ Failure, Success, Try }
 
 /**
@@ -52,5 +56,45 @@ object Idempotent {
     Idempotent[(Req1, Req2), Res] {
       case ((r1, r2), txid) => f(r1, r2, txid)
     }
+
+}
+
+object WsUtils {
+
+  /**
+   * Parses the JSON body of a WS call out of this WSResponse, extract some value thanks to the extract method
+   * and return the result.
+   *
+   * In case of error, bubbles up an exception aligned with the error handling mechanism upstream
+   */
+  def processWsJsonResponse[Resp, Out](extract: Resp => Out)(response: WSResponse)(implicit rds: Reads[Resp]): Out =
+    if (response.status == 200)
+      response.json.validate[Resp] match {
+        case resp: JsSuccess[Resp] => extract(resp.get)
+        case _: JsError =>
+          // TODO: we should populate the jserror in the exception here...
+          throw WsCallException("invalid response received from stock service")
+      }
+    else
+      throwWsCallException(response)
+
+  /**
+   * Similar to processWsJsonResponse for the case where the successful 200 response is not expected to contain a
+   * body (or we just do not care about it...^^)
+   */
+  def processWsEmptyResponse[Resp, Out](response: WSResponse): Unit =
+    if (response.status != 200)
+      throwWsCallException(response)
+
+  private def throwWsCallException(response: WSResponse): Nothing = {
+    // tries to parse the json body of the received error, which could itself fail...
+    val ex = Try {
+      WsCallException(response.json, Some(response.status))
+    }.getOrElse {
+      WsCallException(response.body, Some(response.status))
+    }
+
+    throw ex
+  }
 
 }
